@@ -3,6 +3,7 @@
  *
  *   npm run bootstrap -- --name "Meu App" --domain app.exemplo.com --zone exemplo.com \
  *     [--slug meuapp] [--description "..."] [--region us-east-1] [--skip-aws] [--skip-deploy]
+ *     [--only github|aws|finalize]
  *
  * Idempotente: pode ser rodado de novo e continua de onde parou. Pré-requisitos: node 22, gh (logado com
  * escopos repo, project, workflow), aws CLI com credenciais de admin da conta, bash.
@@ -32,6 +33,8 @@ const { values: args } = parseArgs({
     description: { type: 'string' },
     region: { type: 'string' },
     'skip-aws': { type: 'boolean', default: false },
+    /** Roda só uma fase: github (repo, labels, board), aws (infra e primeiro deploy) ou finalize (commit, proteção). */
+    only: { type: 'string' },
     'skip-deploy': { type: 'boolean', default: false },
   },
 });
@@ -94,56 +97,67 @@ function commitAndPush(c: Config): void {
 
 async function main(): Promise<void> {
   const pending = new Pending();
+  const only = args.only;
+  if (only && !['github', 'aws', 'finalize'].includes(only))
+    throw new Error('--only aceita github, aws ou finalize');
+  const phase = (p: string) => !only || only === p;
   const c = readConfig();
   applyArgs(c);
   log.step(`Projeto ${c.displayName} (${c.slug}) → https://${c.domain}`);
 
-  github.checkGithubAuth(pending);
-  github.fillGithubIds(c);
-  renderIdentity(c);
-  writeConfig(c);
-
-  github.ensureLabels(c);
-  github.ensureProject(c);
-  refreshReadme(c);
-  github.ensureRepoSettings(c);
-  github.checkSecrets(c, pending);
-  writeConfig(c);
-
-  let deployed = false;
-  if (!args['skip-aws']) {
-    aws.checkAwsIdentity(c);
-    aws.resolveZone(c);
+  if (phase('github')) {
+    github.checkGithubAuth(pending);
+    github.fillGithubIds(c);
+    renderIdentity(c);
     writeConfig(c);
-    aws.ensureCdkBootstrap(c);
-    aws.ensureOidcProvider(c);
-    const active = aws.ensureActiveColor(c);
-    aws.checkIssuesSecret(c, pending);
-    run('npm', ['ci']);
-    aws.deployInfra(c, active);
-    if (!args['skip-deploy']) {
-      aws.firstAppDeploy(c);
-      deployed = true;
-    }
-  } else
-    pending.add(
-      'etapas da AWS puladas (--skip-aws): rode de novo sem a flag quando tiver credenciais',
-    );
+    github.ensureLabels(c);
+    github.ensureProject(c);
+    refreshReadme(c);
+    github.ensureRepoSettings(c);
+    github.checkSecrets(c, pending);
+    writeConfig(c);
+  }
 
-  writeConfig(c);
-  commitAndPush(c);
-  github.ensureBranchProtection(c);
-  if (deployed) github.enableDeploy(c);
+  let deployed = only === 'finalize';
+  if (phase('aws')) {
+    if (!args['skip-aws']) {
+      aws.checkAwsIdentity(c);
+      aws.resolveZone(c);
+      writeConfig(c);
+      aws.ensureCdkBootstrap(c);
+      aws.ensureOidcProvider(c);
+      const active = aws.ensureActiveColor(c);
+      aws.checkIssuesSecret(c, pending);
+      run('npm', ['ci']);
+      aws.deployInfra(c, active);
+      if (!args['skip-deploy']) {
+        aws.firstAppDeploy(c);
+        deployed = true;
+      }
+    } else
+      pending.add(
+        'etapas da AWS puladas (--skip-aws): rode de novo sem a flag quando tiver credenciais',
+      );
+    writeConfig(c);
+  }
+
+  if (phase('finalize')) {
+    commitAndPush(c);
+    github.ensureBranchProtection(c);
+    if (deployed) github.enableDeploy(c);
+  }
 
   log.step('Resumo');
   log.info(`Site:  https://${c.domain}`);
   log.info(`API:   https://api.${c.domain}/health`);
-  log.info(`Board: https://github.com/users/${c.github.owner}/projects/${c.github.projectNumber}`);
+  log.info(
+    `Board: https://github.com/users/${c.github.owner}/projects/${c.github.projectNumber ?? ''}`,
+  );
   if (pending.items.length) {
     process.stdout.write('\nPendências (faça e rode o bootstrap de novo para conferir):\n');
     pending.items.forEach((p, i) => process.stdout.write(`  ${i + 1}. ${p}\n`));
     process.exitCode = 2;
-  } else {
+  } else if (!only || only === 'finalize') {
     process.stdout.write('\nTudo pronto. Crie a primeira issue e aplique status:todo.\n');
   }
 }
