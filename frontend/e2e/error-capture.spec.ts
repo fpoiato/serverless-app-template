@@ -49,6 +49,8 @@ test.describe('captura de erros do frontend', () => {
   test('console.error também é capturado', async ({ page }) => {
     const events = await captureClientErrors(page);
     await page.goto('/');
+    // O app só inicia depois de carregar /config.json: espera a captura estar instalada.
+    await expect(page.getByRole('contentinfo')).toBeVisible();
     const sent = page.waitForRequest(isClientErrors);
     // eslint-disable-next-line no-console -- o teste provoca erros no console de propósito
     await page.evaluate(() => console.error('e2e: falha registrada no console'));
@@ -63,6 +65,8 @@ test.describe('captura de erros do frontend', () => {
   test('o mesmo erro repetido não inunda a API', async ({ page }) => {
     const events = await captureClientErrors(page);
     await page.goto('/');
+    // O app só inicia depois de carregar /config.json: espera a captura estar instalada.
+    await expect(page.getByRole('contentinfo')).toBeVisible();
     const sent = page.waitForRequest(isClientErrors);
     await page.evaluate(() => {
       // eslint-disable-next-line no-console -- o teste provoca erros no console de propósito
