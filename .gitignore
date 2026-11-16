@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+cdk.out/
+.angular/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.DS_Store
+
+# Segredos — NUNCA versionar (repo público)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.aws/
+frontend/test-results/
+frontend/playwright-report/
+.agent-review/
+.agent-analysis/

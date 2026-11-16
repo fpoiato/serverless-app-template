@@ -1,0 +1,27 @@
+name: aws-oidc-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  whoami:
+    runs-on: ubuntu-latest
+    environment: prod-deploy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github
+            project.config.json
+          sparse-checkout-cone-mode: false
+      - id: cfg
+        uses: ./.github/actions/project-config
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.cfg.outputs.deploy-role-arn }}
+          aws-region: ${{ steps.cfg.outputs.region }}
+      - run: aws sts get-caller-identity

@@ -1,0 +1,46 @@
+name: pr-checks
+
+# Sem `edited`: editar a descrição não pode substituir o resultado deste check.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:ci-scripts
+      - name: cdk synth
+        run: npm run synth
+      - name: Playwright (navegadores)
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: e2e
+        run: npm run e2e
+        env:
+          CI: 'true'
+      - name: Relatório do Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7

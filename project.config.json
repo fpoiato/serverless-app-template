@@ -1,0 +1,14 @@
+{
+  "$schema": "./project.config.schema.json",
+  "slug": "meuapp",
+  "displayName": "Meu App",
+  "description": "Descrição curta do projeto",
+  "domain": "meuapp.example.com",
+  "hostedZone": { "name": "example.com", "id": "Z0000000000EXAMPLE" },
+  "aws": { "account": "000000000000", "region": "us-east-1", "cdkQualifier": "hnb659fds" },
+  "github": { "owner": "OWNER", "repo": "meuapp" },
+  "web": {},
+  "locale": "pt-BR",
+  "currency": "BRL",
+  "timeZone": "America/Sao_Paulo"
+}

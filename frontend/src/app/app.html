@@ -1,0 +1,19 @@
+<header class="topbar">
+  <a class="brand" routerLink="/">{{ project.displayName }}</a>
+  <nav>
+    <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
+      >Início</a
+    >
+    <a routerLink="/conta" routerLinkActive="active">Minha conta</a>
+  </nav>
+</header>
+<main class="content">
+  <router-outlet />
+</main>
+<footer class="footer">
+  <span data-testid="copyright">© {{ year }} {{ project.displayName }}</span>
+  <span>v{{ config.appVersion }}</span>
+  @if (config.color !== 'local') {
+    <span class="color" [attr.data-color]="config.color">{{ config.color }}</span>
+  }
+</footer>

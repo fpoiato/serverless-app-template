@@ -1,0 +1,202 @@
+name: claude-review
+
+# Revisor: disparado pelo executor (claude-execute) com o PR pronto.
+# Aprova (merge continua humano) ou pede mudanças e devolve ao executor; após 3 reprovações → needs-human.
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Número da issue
+        required: true
+        type: number
+      pr:
+        description: Número do PR
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  actions: write # devolver ao executor
+  checks: read
+
+concurrency:
+  group: claude-issue-${{ inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  MAX_CYCLES: 3
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      next: ${{ steps.apply.outputs.next }}
+    steps:
+      - name: Contexto (ciclo e CI)
+        id: ctx
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = Number('${{ inputs.pr }}');
+            const { data } = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
+            if (data.state !== 'open') core.setFailed(`PR #${pr} não está aberto`);
+            const reviews = await github.paginate(github.rest.pulls.listReviews, { ...context.repo, pull_number: pr });
+            const rejected = reviews.filter((r) => r.user?.login === 'github-actions[bot]' && r.state === 'CHANGES_REQUESTED').length;
+            core.setOutput('cycle', rejected + 1);
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: Number('${{ inputs.issue }}'),
+              body: `🔍 Revisão do PR #${pr} iniciada (ciclo ${rejected + 1}/${process.env.MAX_CYCLES}). Acompanhe: ${run}`,
+            });
+            core.setOutput('sha', data.head.sha);
+
+            // Espera o CI do commit (até 25 min) para revisar com o resultado em mãos.
+            const deadline = Date.now() + 25 * 60_000;
+            let summary = 'sem checks';
+            while (Date.now() < deadline) {
+              const runs = (await github.rest.checks.listForRef({ ...context.repo, ref: data.head.sha })).data.check_runs
+                .filter((r) => ['checks', 'issue-link'].includes(r.name));
+              if (runs.length >= 2 && runs.every((r) => r.status === 'completed')) {
+                summary = runs.map((r) => `${r.name}=${r.conclusion}`).join(', ');
+                break;
+              }
+              await new Promise((r) => setTimeout(r, 30_000));
+            }
+            core.setOutput('ci', summary);
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ctx.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Montar prompt
+        id: prompt
+        run: |
+          mkdir -p .agent-review
+          {
+            echo 'text<<PROMPT_EOF'
+            sed -e "s/{{ISSUE}}/${{ inputs.issue }}/g" -e "s/{{PR}}/${{ inputs.pr }}/g" \
+                -e "s/{{CYCLE}}/${{ steps.ctx.outputs.cycle }}/g" -e "s/{{CI}}/${{ steps.ctx.outputs.ci }}/g" \
+                -e "s#{{PROJECT}}#$(node -p "require('./project.config.json').displayName")#g" -e "s#{{REPO}}#${{ github.repository }}#g" \
+                .github/prompts/reviewer.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # github_token = GITHUB_TOKEN com contents:read: o revisor comenta, mas não consegue
+      # fazer push nem merge (o merge é sempre humano).
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Executor e revisor se disparam via workflow_dispatch com o GITHUB_TOKEN (ator github-actions).
+          allowed_bots: github-actions
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Read,Write,Edit,Glob,Grep,LS,TodoWrite,Bash(gh:*),Bash(git:*),Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*)"
+
+      - name: Aplicar decisão
+        id: apply
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = await import('node:fs');
+            const issue = Number('${{ inputs.issue }}');
+            const pr = Number('${{ inputs.pr }}');
+            const cycle = Number('${{ steps.ctx.outputs.cycle }}');
+            const max = Number(process.env.MAX_CYCLES);
+            let d;
+            try {
+              d = JSON.parse(fs.readFileSync('.agent-review/decision.json', 'utf8'));
+            } catch (e) {
+              core.warning(`decision.json ausente ou inválido: ${e.message}`);
+              d = null;
+            }
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const notify = (body) =>
+              github.rest.issues.createComment({ ...context.repo, issue_number: issue, body: `${body} Run: ${run}` });
+            const setStatus = async (label) => {
+              const { data } = await github.rest.issues.get({ ...context.repo, issue_number: issue });
+              for (const l of data.labels.map((x) => x.name).filter((n) => n.startsWith('status:'))) {
+                await github.rest.issues.removeLabel({ ...context.repo, issue_number: issue, name: l });
+              }
+              await github.rest.issues.addLabels({ ...context.repo, issue_number: issue, labels: [label] });
+            };
+
+            if (!d || !['approve', 'request_changes'].includes(d.decision)) {
+              await setStatus('status:needs-human');
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: pr,
+                body: '⚠️ O revisor automático não produziu uma decisão. Revisão humana necessária.',
+              });
+              await notify(`🛑 PR #${pr} precisa de atenção humana: o revisor não produziu uma decisão.`);
+              core.setOutput('next', 'needs-human');
+              return;
+            }
+
+            const header = `**Revisão automática — ciclo ${cycle}/${max}**\n\n`;
+            if (d.decision === 'approve') {
+              await github.rest.pulls.createReview({
+                ...context.repo, pull_number: pr, event: 'APPROVE',
+                body: `${header}${d.summary}\n\n✅ Aprovado. O merge é humano.`,
+              });
+              await setStatus('status:review');
+              await notify(`✅ PR #${pr} aprovado pelo revisor. Aguardando merge humano.`);
+              core.setOutput('next', 'human-merge');
+              return;
+            }
+
+            const exhausted = cycle >= max;
+            await github.rest.pulls.createReview({
+              ...context.repo, pull_number: pr, event: 'REQUEST_CHANGES',
+              body: `${header}${d.summary}\n\n${exhausted
+                ? `🛑 Limite de ${max} ciclos atingido: precisa de atenção humana.`
+                : '🔁 Devolvido ao executor para rework.'}`,
+            });
+            await setStatus(exhausted ? 'status:needs-human' : 'status:rework');
+            await notify(
+              exhausted
+                ? `🛑 PR #${pr} precisa de atenção humana: limite de ${max} ciclos de revisão atingido.`
+                : `🔁 PR #${pr} devolvido para rework (ciclo ${cycle}/${max}).`,
+            );
+            core.setOutput('next', exhausted ? 'needs-human' : 'rework');
+
+  rework:
+    needs: review
+    if: needs.review.outputs.next == 'rework'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'claude-execute.yml',
+              ref: 'main',
+              inputs: { issue: '${{ inputs.issue }}', mode: 'rework' },
+            });
+
+  sync:
+    needs: review
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'project-sync.yml',
+              ref: 'main',
+              inputs: { issue: '${{ inputs.issue }}' },
+            });

@@ -1,0 +1,3 @@
+# Toda mudança precisa da revisão do dono. Os bots (executor e revisor) não satisfazem esta regra,
+# então nenhum deles consegue fazer merge: o merge é sempre humano.
+* @OWNER

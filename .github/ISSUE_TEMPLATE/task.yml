@@ -1,0 +1,15 @@
+name: Task
+description: Tarefa técnica / infraestrutura
+labels: ['type:task', 'status:backlog']
+body:
+  - type: textarea
+    id: objetivo
+    attributes: { label: Objetivo }
+    validations: { required: true }
+  - type: textarea
+    id: escopo
+    attributes: { label: Escopo }
+  - type: textarea
+    id: aceite
+    attributes: { label: Critérios de aceite, value: '- [ ] ' }
+    validations: { required: true }

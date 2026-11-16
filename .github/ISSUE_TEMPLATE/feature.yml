@@ -1,0 +1,16 @@
+name: Feature
+description: Funcionalidade nova
+labels: ['type:feature', 'status:backlog']
+body:
+  - type: textarea
+    id: objetivo
+    attributes: { label: Objetivo, description: O que e por quê }
+    validations: { required: true }
+  - type: textarea
+    id: escopo
+    attributes: { label: Escopo }
+    validations: { required: true }
+  - type: textarea
+    id: aceite
+    attributes: { label: Critérios de aceite, value: '- [ ] ' }
+    validations: { required: true }

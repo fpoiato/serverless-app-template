@@ -1,0 +1,22 @@
+{
+  "name": "@app/infra",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "synth": "cdk synth --quiet",
+    "cdk": "cdk",
+    "deploy:backend": "bash -c 'source scripts/project-env.sh && cdk deploy \"$SLUG-backend\" -c app:activeColor=$(aws ssm get-parameter --name \"$SSM_PREFIX/active-color\" --query Parameter.Value --output text)'",
+    "deploy:frontend": "bash -c 'source scripts/project-env.sh && cdk deploy \"$SLUG-frontend\" -c app:activeColor=$(aws ssm get-parameter --name \"$SSM_PREFIX/active-color\" --query Parameter.Value --output text)'",
+    "swap": "scripts/swap.sh"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.277.0",
+    "constructs": "^10.8.1"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1148.1"
+  }
+}

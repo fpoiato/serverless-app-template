@@ -1,0 +1,38 @@
+name: rollback
+
+# Swap reverso: devolve a produção à cor inativa (a anterior). Exige aprovação no prod-swap.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: prod-swap
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @app/shared
+      - id: cfg
+        uses: ./.github/actions/project-config
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.cfg.outputs.deploy-role-arn }}
+          aws-region: ${{ steps.cfg.outputs.region }}
+      - name: Swap reverso
+        run: |
+          ACTIVE=$(aws ssm get-parameter --name "/${{ steps.cfg.outputs.slug }}/active-color" --query Parameter.Value --output text)
+          if [ "$ACTIVE" = "blue" ]; then TARGET=green; else TARGET=blue; fi
+          echo "Rollback: $ACTIVE -> $TARGET"
+          bash infra/scripts/swap.sh "$TARGET"

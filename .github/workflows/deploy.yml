@@ -1,0 +1,94 @@
+name: deploy
+
+# Merge na main → deploy na cor inativa → smoke → swap (aprovação manual no environment prod-swap).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Só roda em repositórios já preparados pelo bootstrap (variável de repositório DEPLOY_ENABLED=true).
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: prod-deploy
+    outputs:
+      active: ${{ steps.deploy.outputs.active }}
+      inactive: ${{ steps.deploy.outputs.inactive }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @app/shared
+      - id: cfg
+        uses: ./.github/actions/project-config
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.cfg.outputs.deploy-role-arn }}
+          aws-region: ${{ steps.cfg.outputs.region }}
+      - id: deploy
+        run: bash infra/scripts/deploy.sh "${GITHUB_SHA::7}"
+
+  smoke:
+    needs: deploy
+    runs-on: ubuntu-latest
+    env:
+      COLOR: ${{ needs.deploy.outputs.inactive }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - id: cfg
+        uses: ./.github/actions/project-config
+      - name: Smoke e2e na cor inativa
+        run: npx playwright test smoke.spec.ts --project=chromium
+        working-directory: frontend
+        env:
+          CI: 'true'
+          E2E_BASE_URL: https://${{ env.COLOR }}.${{ steps.cfg.outputs.domain }}
+          SMOKE_API_URL: https://api-${{ env.COLOR }}.${{ steps.cfg.outputs.domain }}
+          SMOKE_COLOR: ${{ env.COLOR }}
+      - name: Relatório do Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-smoke-report
+          path: frontend/playwright-report
+          retention-days: 7
+
+  # Aprovação manual: o environment prod-swap exige revisor.
+  swap:
+    needs: [deploy, smoke]
+    runs-on: ubuntu-latest
+    environment: prod-swap
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @app/shared
+      - id: cfg
+        uses: ./.github/actions/project-config
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.cfg.outputs.deploy-role-arn }}
+          aws-region: ${{ steps.cfg.outputs.region }}
+      - name: Swap para ${{ needs.deploy.outputs.inactive }}
+        run: bash infra/scripts/swap.sh "${{ needs.deploy.outputs.inactive }}"

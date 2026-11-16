@@ -1,0 +1,105 @@
+name: project-sync
+
+# Labels `status:*` são a fonte da verdade; este workflow mantém o board do Project igual a elas.
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled, closed]
+  workflow_dispatch: # sem `issue`: ressincroniza todas as issues
+    inputs:
+      issue:
+        description: Número da issue (vazio = todas)
+        required: false
+        type: string
+  # Chamado pelo executor/revisor depois de mudarem labels com o GITHUB_TOKEN
+  # (essas mudanças não disparam o evento `issues`).
+  workflow_call:
+    inputs:
+      issue:
+        description: Número da issue a sincronizar
+        type: number
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: project-sync-${{ inputs.issue || github.event.issue.number || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
+      # 1. Normaliza as labels com o GITHUB_TOKEN (mudanças feitas por ele não redisparam workflows).
+      - name: Normalizar labels
+        id: labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { columnFor, defaultStatusLabel, extraStatusLabels } = await import(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/project-sync.mjs`
+            );
+            const repo = context.repo;
+            let issues;
+            const single = Number('${{ inputs.issue || 0 }}');
+            if (single) {
+              issues = [(await github.rest.issues.get({ ...repo, issue_number: single })).data];
+            } else if (context.eventName === 'workflow_dispatch') {
+              issues = (await github.paginate(github.rest.issues.listForRepo, { ...repo, state: 'all', per_page: 100 }))
+                .filter((i) => !i.pull_request);
+            } else {
+              issues = [context.payload.issue];
+            }
+
+            const out = [];
+            for (const issue of issues) {
+              let labels = issue.labels.map((l) => l.name);
+              const def = !single && context.payload.action === 'opened' ? defaultStatusLabel(issue) : null;
+              if (def) {
+                await github.rest.issues.addLabels({ ...repo, issue_number: issue.number, labels: [def] });
+                labels.push(def);
+              }
+              const justAdded = !single && context.payload.action === 'labeled' ? context.payload.label?.name : undefined;
+              for (const name of extraStatusLabels(labels, justAdded)) {
+                await github.rest.issues.removeLabel({ ...repo, issue_number: issue.number, name }).catch(() => undefined);
+                labels = labels.filter((l) => l !== name);
+              }
+              const column = columnFor({ state: issue.state }, labels);
+              core.info(`#${issue.number} → ${column}`);
+              out.push({ number: issue.number, nodeId: issue.node_id, column });
+            }
+            core.setOutput('items', JSON.stringify(out));
+
+      # 2. Atualiza o board com o PROJECT_TOKEN (o GITHUB_TOKEN não acessa Projects de usuário).
+      - name: Atualizar board
+        uses: actions/github-script@v7
+        env:
+          ITEMS: ${{ steps.labels.outputs.items }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const fs = await import('node:fs');
+            const cfg = JSON.parse(fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/.github/project.json`, 'utf8'));
+            for (const item of JSON.parse(process.env.ITEMS)) {
+              const added = await github.graphql(
+                `mutation($p: ID!, $c: ID!) { addProjectV2ItemById(input: { projectId: $p, contentId: $c }) { item { id } } }`,
+                { p: cfg.projectId, c: item.nodeId },
+              );
+              await github.graphql(
+                `mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) {
+                  updateProjectV2ItemFieldValue(input: { projectId: $p, itemId: $i, fieldId: $f, value: { singleSelectOptionId: $o } }) { projectV2Item { id } }
+                }`,
+                {
+                  p: cfg.projectId,
+                  i: added.addProjectV2ItemById.item.id,
+                  f: cfg.statusFieldId,
+                  o: cfg.statusOptions[item.column],
+                },
+              );
+              core.info(`#${item.number}: ${item.column}`);
+            }

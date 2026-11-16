@@ -1,0 +1,171 @@
+name: claude-execute
+
+# Executor: issue em Todo (ou reprovada na revisão) → Claude implementa e abre/atualiza o PR.
+# Encadeamento: executor → claude-review (workflow_dispatch) → executor em rework (workflow_dispatch).
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Número da issue
+        required: true
+        type: number
+      mode:
+        description: execute ou rework
+        required: true
+        default: execute
+        type: choice
+        options: [execute, rework]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write # disparar o revisor
+  id-token: write # autenticação do claude-code-action no app do Claude
+
+concurrency:
+  group: claude-issue-${{ inputs.issue || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  start:
+    # Só o dono do repo libera tarefas (repo público: ninguém de fora dispara o Claude).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'status:todo' && github.event.sender.login == github.repository_owner)
+    runs-on: ubuntu-latest
+    outputs:
+      issue: ${{ steps.ctx.outputs.issue }}
+      mode: ${{ steps.ctx.outputs.mode }}
+    steps:
+      - id: ctx
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = Number('${{ inputs.issue || github.event.issue.number }}');
+            const mode = '${{ inputs.mode || 'execute' }}';
+            const { data } = await github.rest.issues.get({ ...context.repo, issue_number: issue });
+            if (data.state !== 'open' || data.pull_request) core.setFailed(`#${issue} não é uma issue aberta`);
+            // Troca o status para in-progress (o board é atualizado pelo job sync abaixo).
+            for (const l of data.labels.map((x) => x.name).filter((n) => n.startsWith('status:'))) {
+              await github.rest.issues.removeLabel({ ...context.repo, issue_number: issue, name: l });
+            }
+            await github.rest.issues.addLabels({ ...context.repo, issue_number: issue, labels: ['status:in-progress'] });
+            core.setOutput('issue', issue);
+            core.setOutput('mode', mode);
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: issue,
+              body: `🔧 Executor iniciou (modo ${mode}). Acompanhe: ${run}`,
+            });
+
+  sync-start:
+    needs: start
+    uses: ./.github/workflows/project-sync.yml
+    with:
+      issue: ${{ fromJSON(needs.start.outputs.issue) }}
+    secrets: inherit
+
+  execute:
+    needs: start
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      pr: ${{ steps.pr.outputs.pr }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Montar prompt
+        id: prompt
+        run: |
+          {
+            echo 'text<<PROMPT_EOF'
+            sed -e "s/{{ISSUE}}/${{ needs.start.outputs.issue }}/g" -e "s/{{MODE}}/${{ needs.start.outputs.mode }}/g" -e "s#{{PROJECT}}#$(node -p "require('./project.config.json').displayName")#g" -e "s#{{REPO}}#${{ github.repository }}#g" \
+                .github/prompts/executor.md
+            echo 'PROMPT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # Sem github_token: o action usa o app do Claude, e push/PR feitos por ele disparam o CI.
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Executor e revisor se disparam via workflow_dispatch com o GITHUB_TOKEN (ator github-actions).
+          allowed_bots: github-actions
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: >-
+            --max-turns 150
+            --allowedTools "Read,Write,Edit,MultiEdit,Glob,Grep,LS,TodoWrite,Bash(npm:*),Bash(npx:*),Bash(node:*),Bash(git:*),Bash(gh:*),Bash(ls:*),Bash(cat:*),Bash(mkdir:*),Bash(rm:*),Bash(mv:*),Bash(cp:*)"
+
+      - name: Encontrar o PR da issue
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = Number('${{ needs.start.outputs.issue }}');
+            const prs = await github.paginate(github.rest.pulls.list, { ...context.repo, state: 'open', per_page: 100 });
+            const pr = prs.find((p) => new RegExp(`^(feat|fix|task|error|docs)/${issue}-`).test(p.head.ref));
+            core.setOutput('pr', pr ? pr.number : '');
+
+  finish:
+    needs: [start, execute]
+    if: always() && needs.start.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = Number('${{ needs.start.outputs.issue }}');
+            const pr = '${{ needs.execute.outputs.pr }}';
+            const ok = '${{ needs.execute.result }}' === 'success' && pr;
+            const next = ok ? 'status:review' : 'status:needs-human';
+            await github.rest.issues.removeLabel({ ...context.repo, issue_number: issue, name: 'status:in-progress' }).catch(() => undefined);
+            await github.rest.issues.addLabels({ ...context.repo, issue_number: issue, labels: [next] });
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            if (ok) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issue,
+                body: `✅ PR #${pr} aberto/atualizado e enviado para revisão. Run: ${run}`,
+              });
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  ...context.repo,
+                  workflow_id: 'claude-review.yml',
+                  ref: context.payload.repository?.default_branch ?? 'main',
+                  inputs: { issue: String(issue), pr: String(pr) },
+                });
+              } catch (e) {
+                // Até a #13 estar na main o revisor não existe: o PR fica em Review para o humano.
+                await github.rest.issues.createComment({
+                  ...context.repo,
+                  issue_number: issue,
+                  body: `PR #${pr} pronto. Revisor automático indisponível (${e.status ?? e.message}); revisão humana necessária.`,
+                });
+              }
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issue,
+                body: `⚠️ O executor não concluiu a tarefa (sem PR aberto ou execução com falha). Precisa de atenção humana: ${run}`,
+              });
+            }
+
+  sync-finish:
+    needs: [start, finish]
+    if: always() && needs.start.result == 'success'
+    uses: ./.github/workflows/project-sync.yml
+    with:
+      issue: ${{ fromJSON(needs.start.outputs.issue) }}
+    secrets: inherit

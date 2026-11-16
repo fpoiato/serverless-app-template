@@ -1,0 +1,33 @@
+name: project-config
+description: Lê project.config.json e expõe os valores do projeto como outputs.
+outputs:
+  slug:
+    value: ${{ steps.read.outputs.slug }}
+  display-name:
+    value: ${{ steps.read.outputs.display_name }}
+  domain:
+    value: ${{ steps.read.outputs.domain }}
+  account:
+    value: ${{ steps.read.outputs.account }}
+  region:
+    value: ${{ steps.read.outputs.region }}
+  deploy-role-arn:
+    value: ${{ steps.read.outputs.deploy_role_arn }}
+runs:
+  using: composite
+  steps:
+    - id: read
+      shell: bash
+      run: |
+        node -e '
+          const c = require(process.cwd() + "/project.config.json");
+          const out = {
+            slug: c.slug,
+            display_name: c.displayName,
+            domain: c.domain,
+            account: c.aws.account,
+            region: c.aws.region,
+            deploy_role_arn: `arn:aws:iam::${c.aws.account}:role/${c.slug}-gha-deploy`,
+          };
+          for (const [k, v] of Object.entries(out)) require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`);
+        '
