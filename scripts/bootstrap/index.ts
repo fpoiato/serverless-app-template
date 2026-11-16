@@ -48,7 +48,7 @@ const slugify = (s: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 20);
 
-function applyArgs(c: Config): void {
+function applyArgs(c: Config, useGh: boolean): void {
   if (args.name) c.displayName = args.name;
   if (args.slug) c.slug = args.slug;
   else if (args.name && c.slug === 'meuapp') c.slug = slugify(args.name);
@@ -58,14 +58,19 @@ function applyArgs(c: Config): void {
   if (args.description) c.description = args.description;
   if (args.region) c.aws.region = args.region;
 
-  const repo = ghJson<{ owner: { login: string }; name: string }>(
-    'repo',
-    'view',
-    '--json',
-    'owner,name',
-  );
-  c.github.owner = repo.owner.login;
-  c.github.repo = repo.name;
+  // O repositório vem do remote do git (via gh). Nas fases que não usam o GitHub, vale o que já está no config.
+  if (useGh) {
+    const repo = ghJson<{ owner: { login: string }; name: string }>(
+      'repo',
+      'view',
+      '--json',
+      'owner,name',
+    );
+    c.github.owner = repo.owner.login;
+    c.github.repo = repo.name;
+  } else if (c.github.owner === 'OWNER') {
+    throw new Error('rode antes a fase do GitHub (sem --only, ou --only github)');
+  }
 
   const problems: string[] = [];
   if (c.domain.endsWith('example.com')) problems.push('informe o domínio (--domain)');
@@ -102,7 +107,7 @@ async function main(): Promise<void> {
     throw new Error('--only aceita github, aws ou finalize');
   const phase = (p: string) => !only || only === p;
   const c = readConfig();
-  applyArgs(c);
+  applyArgs(c, only !== 'aws');
   log.step(`Projeto ${c.displayName} (${c.slug}) → https://${c.domain}`);
 
   if (phase('github')) {
