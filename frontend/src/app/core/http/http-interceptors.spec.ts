@@ -2,7 +2,7 @@ import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { APP_CONFIG, buildConfig } from '../config/app-config';
+import { APP_CONFIG, resolveConfig } from '../config/app-config';
 import { ErrorReporter } from '../errors/error-reporter';
 import {
   correlationIdInterceptor,
@@ -30,7 +30,15 @@ describe('interceptors', () => {
     report.mockReset();
     TestBed.configureTestingModule({
       providers: [
-        { provide: APP_CONFIG, useValue: buildConfig('blue', 't', 'exemplo.com') },
+        {
+          provide: APP_CONFIG,
+          useValue: resolveConfig({
+            color: 'blue',
+            version: 't',
+            apiUrl: 'https://api-blue.exemplo.com',
+            wsUrl: 'wss://ws-blue.exemplo.com',
+          }),
+        },
         { provide: ErrorReporter, useValue: { report } },
         provideHttpClient(withInterceptors([correlationIdInterceptor, errorReportingInterceptor])),
         provideHttpClientTesting(),

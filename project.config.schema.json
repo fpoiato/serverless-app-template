@@ -2,15 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Configuração do projeto",
   "type": "object",
-  "required": ["slug", "displayName", "domain", "hostedZone", "aws", "github", "web"],
+  "required": ["slug", "displayName", "domain", "hostedZone", "aws", "github"],
   "properties": {
     "slug": {
       "description": "Prefixo de todos os recursos (stacks, Lambdas, buckets, SSM, log groups). Minúsculas, números e hífen.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,20}$"
     },
-    "displayName": { "type": "string" },
-    "description": { "type": "string" },
+    "displayName": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
     "domain": {
       "description": "Domínio do site. Pode ser a própria zona (meuapp.com) ou um subdomínio dela (app.exemplo.com).",
       "type": "string"
@@ -18,43 +22,67 @@
     "hostedZone": {
       "type": "object",
       "required": ["name", "id"],
-      "properties": { "name": { "type": "string" }, "id": { "type": "string" } }
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      }
     },
     "aws": {
       "type": "object",
       "required": ["account", "region"],
       "properties": {
-        "account": { "type": "string", "pattern": "^[0-9]{12}$" },
-        "region": { "type": "string" },
-        "cdkQualifier": { "type": "string", "default": "hnb659fds" }
+        "account": {
+          "type": "string",
+          "pattern": "^[0-9]{12}$"
+        },
+        "region": {
+          "type": "string"
+        },
+        "cdkQualifier": {
+          "type": "string",
+          "default": "hnb659fds"
+        }
       }
     },
     "github": {
       "type": "object",
       "required": ["owner", "repo"],
       "properties": {
-        "owner": { "type": "string" },
-        "repo": { "type": "string" },
+        "owner": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
         "ownerId": {
           "type": "integer",
           "description": "Preenchido pelo bootstrap (subject imutável do OIDC)"
         },
-        "repoId": { "type": "integer", "description": "Preenchido pelo bootstrap" },
-        "projectNumber": { "type": "integer", "description": "Preenchido pelo bootstrap" }
-      }
-    },
-    "web": {
-      "type": "object",
-      "properties": {
-        "distributionIds": {
-          "description": "Preenchido pelo bootstrap após o primeiro deploy do frontend",
-          "type": "object",
-          "properties": { "blue": { "type": "string" }, "green": { "type": "string" } }
+        "repoId": {
+          "type": "integer",
+          "description": "Preenchido pelo bootstrap"
+        },
+        "projectNumber": {
+          "type": "integer",
+          "description": "Preenchido pelo bootstrap"
         }
       }
     },
-    "locale": { "type": "string", "default": "pt-BR" },
-    "currency": { "type": "string", "default": "BRL" },
-    "timeZone": { "type": "string", "default": "America/Sao_Paulo" }
+    "locale": {
+      "type": "string",
+      "default": "pt-BR"
+    },
+    "currency": {
+      "type": "string",
+      "default": "BRL"
+    },
+    "timeZone": {
+      "type": "string",
+      "default": "America/Sao_Paulo"
+    }
   }
 }

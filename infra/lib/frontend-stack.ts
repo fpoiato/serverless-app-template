@@ -1,13 +1,14 @@
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import type * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import type { Construct } from 'constructs';
-import { HOSTS, PROJECT, name, ns } from './config.js';
+import { DEPLOY_ROLE_NAME, HOSTS, PROJECT, name, ns } from './config.js';
 import { COLORS, type Color } from './constructs/app-function.js';
 
 export interface FrontendStackProps extends StackProps {
@@ -118,6 +119,26 @@ export class FrontendStack extends Stack {
       this.buckets[color] = bucket;
       this.distributions[color] = distribution;
     }
+    // A stack que cria as distribuições concede à role de deploy o que ela precisa sobre elas
+    // (invalidação no deploy; associate-alias exige também UpdateDistribution no swap).
+    const deployRole = iam.Role.fromRoleName(this, 'DeployRole', DEPLOY_ROLE_NAME);
+    new iam.Policy(this, 'DeployRoleDistributions', {
+      policyName: name('deploy-distributions'),
+      roles: [deployRole],
+      statements: [
+        new iam.PolicyStatement({
+          sid: 'DeployAndSwapDistributions',
+          actions: [
+            'cloudfront:CreateInvalidation',
+            'cloudfront:GetInvalidation',
+            'cloudfront:GetDistribution',
+            'cloudfront:AssociateAlias',
+            'cloudfront:UpdateDistribution',
+          ],
+          resources: COLORS.map((c) => this.distributions[c].distributionArn),
+        }),
+      ],
+    });
   }
 
   private alias(zone: route53.IHostedZone, id: string, host: string, d: cloudfront.Distribution) {

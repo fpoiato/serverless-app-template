@@ -1,7 +1,7 @@
 import { CfnOutput, Duration, Stack, type StackProps } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
-import { GITHUB_OIDC_SUB_PREFIXES, PROJECT, WEB_DISTRIBUTION_IDS, name } from './config.js';
+import { DEPLOY_ROLE_NAME, GITHUB_OIDC_SUB_PREFIXES, PROJECT, name } from './config.js';
 
 /**
  * Roles assumidas pelo GitHub Actions via OIDC (sem access keys).
@@ -23,7 +23,7 @@ export class GithubOidcStack extends Stack {
 
     // Deploy e swap: somente a partir dos environments protegidos do repo.
     const deployRole = new iam.Role(this, 'DeployRole', {
-      roleName: name('gha-deploy'),
+      roleName: DEPLOY_ROLE_NAME,
       maxSessionDuration: Duration.hours(1),
       assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
         StringEquals: audience,
@@ -51,18 +51,13 @@ export class GithubOidcStack extends Stack {
         resources: [`arn:aws:s3:::${name('web-*')}`, `arn:aws:s3:::${name('web-*')}/*`],
       }),
     );
-    deployRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'CloudFrontInvalidation',
-        actions: ['cloudfront:CreateInvalidation', 'cloudfront:GetInvalidation'],
-        // Restringido às distribuições do projeto na issue #5 (ARNs conhecidos após a criação).
-        resources: [`arn:aws:cloudfront::${PROJECT.account}:distribution/*`],
-      }),
-    );
+    // Permissões sobre as distribuições CloudFront (invalidação e swap) são concedidas pela stack do
+    // frontend, que cria as distribuições: nenhum ID gerado pela AWS precisa ser copiado para cá.
     deployRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'ActiveColorParameter',
-        actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+        // GetParametersByPath: /<slug>/public → /config.json do frontend.
+        actions: ['ssm:GetParameter', 'ssm:GetParametersByPath', 'ssm:PutParameter'],
         resources: [`arn:aws:ssm:${PROJECT.region}:${PROJECT.account}:parameter/${PROJECT.slug}/*`],
       }),
     );
@@ -98,24 +93,6 @@ export class GithubOidcStack extends Stack {
         ],
       }),
     );
-    // Só existe depois do primeiro deploy do frontend: o bootstrap grava os IDs das distribuições em
-    // project.config.json e reimplanta esta stack antes do primeiro swap.
-    if (WEB_DISTRIBUTION_IDS.length > 0) {
-      deployRole.addToPolicy(
-        new iam.PolicyStatement({
-          sid: 'SwapCloudFrontAlias',
-          // associate-alias exige também UpdateDistribution na distribuição de destino.
-          actions: [
-            'cloudfront:GetDistribution',
-            'cloudfront:AssociateAlias',
-            'cloudfront:UpdateDistribution',
-          ],
-          resources: WEB_DISTRIBUTION_IDS.map(
-            (id) => `arn:aws:cloudfront::${PROJECT.account}:distribution/${id}`,
-          ),
-        }),
-      );
-    }
     deployRole.addToPolicy(
       new iam.PolicyStatement({
         sid: 'SwapDns',

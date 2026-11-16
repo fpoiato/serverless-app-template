@@ -1,6 +1,6 @@
-# **PROJECT_NAME** — instruções para o Claude (e para humanos)
+# {{PROJECT_NAME}} — instruções para o Claude (e para humanos)
 
-**DESCRIPTION** em ****DOMAIN****. Se o repositório for público, nunca versione segredos.
+{{DESCRIPTION}} em **{{DOMAIN}}**. Se o repositório for público, nunca versione segredos.
 
 > Projeto criado a partir de [serverless-app-template](https://github.com/fpoiato/serverless-app-template).
 > Regras de negócio específicas deste projeto vão na seção **Domínio** abaixo.
@@ -17,9 +17,17 @@
 
 ## Configuração do projeto
 
-Nome, domínio, zona DNS, conta/região AWS e repositório ficam **só** em `project.config.json`
-(infra, scripts, workflows, prompts e frontend leem dele). Recursos AWS usam o prefixo `slug`
-(`<slug>-backend`, `/<slug>/errors`, `<slug>-web-blue`...). Nunca escreva esses valores no código.
+| O quê                                                                                        | Onde fica                                                   |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| **Entradas** decididas por humanos: slug, nome, domínio, zona, conta/região AWS, repositório | `project.config.json` (versionado)                          |
+| **Saídas** geradas pela AWS: IDs, ARNs, nomes gerados (distribuições, User Pool, API...)     | SSM `/<slug>/...`, publicadas pela stack que cria o recurso |
+| Saídas que o **navegador** precisa (ex.: User Pool e Client ID do Cognito)                   | SSM `/<slug>/public/...`                                    |
+| **Estado** mutável (cor ativa)                                                               | SSM `/<slug>/active-color`                                  |
+
+- Nunca escreva no código, nem no `project.config.json`, um valor gerado pela AWS.
+- Permissões sobre um recurso são concedidas **pela stack que o cria** (ex.: a stack do frontend concede à role
+  `<slug>-gha-deploy` o que ela precisa nas distribuições). Assim nenhum ID é copiado entre stacks.
+- Recursos AWS usam o prefixo `slug` (`<slug>-backend`, `/<slug>/errors`, `<slug>-web-blue`...).
 
 ## Estrutura
 
@@ -72,8 +80,11 @@ Antes de abrir PR, `npm run lint && npm run typecheck && npm test` precisam pass
 - Erros do navegador (JS, promessas, HTTP 5xx/0, CSP, chunk, `console.error`) são enviados
   automaticamente para `POST /client-errors` (`frontend/src/app/core/errors`). Não engula erros;
   deixe-os chegar ao `ErrorHandler`.
-- Cada cor é um build próprio: `ng build --define "APP_COLOR='green'" --define "APP_VERSION='<sha>'"`.
+- **Um único build** serve às duas cores. Cor, versão, URLs da API e valores públicos vêm de `/config.json`,
+  gerado no deploy para cada cor (`infra/scripts/web-config.mjs`) e lido antes de o app iniciar (`APP_CONFIG`).
   O frontend de uma cor fala com a API da mesma cor (`api-<cor>.<domínio>`).
+- Valor da AWS que o navegador precisa (ex.: Cognito): a stack publica em SSM `/<slug>/public/<nome>` e ele
+  aparece em `APP_CONFIG.public['<nome>']` no próximo deploy, sem mudar o build. Nunca coloque segredos ali.
 - Nada de script ou handler inline no HTML: o CSP (`script-src 'self'`) bloqueia.
   Por isso `inlineCritical` está desligado no build.
 - Componentes standalone, `OnPush`, prefixo `app-`.

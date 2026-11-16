@@ -48,9 +48,9 @@ export function renderIdentity(c: Config): void {
   add(
     'CLAUDE.md',
     replaceIn('CLAUDE.md', [
-      ['__PROJECT_NAME__', c.displayName],
-      ['__DESCRIPTION__', c.description ?? c.displayName],
-      ['__DOMAIN__', c.domain],
+      ['{{PROJECT_NAME}}', c.displayName],
+      ['{{DESCRIPTION}}', c.description ?? c.displayName],
+      ['{{DOMAIN}}', c.domain],
     ]),
   );
   add('LICENSE', replaceIn('LICENSE', [['OWNER', c.github.owner]]));

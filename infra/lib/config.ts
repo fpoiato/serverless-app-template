@@ -16,7 +16,6 @@ export interface ProjectConfig {
     repoId?: number;
     projectNumber?: number;
   };
-  web: { distributionIds?: { blue?: string; green?: string } };
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -59,13 +58,8 @@ export const GITHUB_OIDC_SUB_PREFIXES = [
 
 export const env = { account: PROJECT.account, region: PROJECT.region };
 
-/**
- * Distribuições CloudFront do frontend. Preenchidas pelo bootstrap depois do primeiro deploy do
- * frontend; usadas para restringir as permissões da role de deploy sem dependência entre stacks.
- */
-export const WEB_DISTRIBUTION_IDS = Object.values(cfg.web.distributionIds ?? {}).filter(
-  (id): id is string => Boolean(id),
-);
+/** Role assumida pelo GitHub Actions no deploy e no swap (criada pela stack `<slug>-github-oidc`). */
+export const DEPLOY_ROLE_NAME = name('gha-deploy');
 
 /** Hosts do projeto. Todos cobertos pelo certificado `<domain>` + `*.<domain>`. */
 export const HOSTS = {

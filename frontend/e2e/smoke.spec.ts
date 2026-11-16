@@ -24,4 +24,12 @@ test.describe('smoke (deploy)', () => {
     expect(body.status).toBe('ok');
     if (COLOR) expect(body.color).toBe(COLOR);
   });
+
+  test('/config.json publicado aponta para a API da própria cor', async ({ request }) => {
+    const res = await request.get('/config.json');
+    expect(res.status()).toBe(200);
+    const cfg = (await res.json()) as { color: string; apiUrl: string };
+    if (COLOR) expect(cfg.color).toBe(COLOR);
+    expect(cfg.apiUrl).toBe(API);
+  });
 });

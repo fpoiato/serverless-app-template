@@ -1,13 +1,7 @@
 import { App } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
-import {
-  env,
-  GITHUB_OIDC_SUB_PREFIXES,
-  name,
-  PROJECT,
-  WEB_DISTRIBUTION_IDS,
-} from '../lib/config.js';
+import { env, GITHUB_OIDC_SUB_PREFIXES, name, PROJECT } from '../lib/config.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
 
 const template = Template.fromStack(new GithubOidcStack(new App(), 'test', { env }));
@@ -75,15 +69,6 @@ describe('GithubOidcStack', () => {
 });
 
 describe('permissões de deploy e swap', () => {
-  it.runIf(WEB_DISTRIBUTION_IDS.length === 0)(
-    'sem IDs das distribuições, não há permissão de swap no CloudFront',
-    () => {
-      expect(JSON.stringify(template.findResources('AWS::IAM::Policy'))).not.toContain(
-        'cloudfront:AssociateAlias',
-      );
-    },
-  );
-
   const policies = JSON.stringify(template.findResources('AWS::IAM::Policy'));
 
   it('Lambda só nas funções do projeto', () => {
@@ -113,26 +98,7 @@ describe('permissões de deploy e swap', () => {
     });
   });
 
-  it.skipIf(WEB_DISTRIBUTION_IDS.length === 0)(
-    'CloudFront: mover alias exige UpdateDistribution, só nas duas distribuições do projeto',
-    () => {
-      template.hasResourceProperties('AWS::IAM::Policy', {
-        PolicyDocument: {
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Sid: 'SwapCloudFrontAlias',
-              Action: [
-                'cloudfront:GetDistribution',
-                'cloudfront:AssociateAlias',
-                'cloudfront:UpdateDistribution',
-              ],
-              Resource: WEB_DISTRIBUTION_IDS.map(
-                (id) => `arn:aws:cloudfront::${PROJECT.account}:distribution/${id}`,
-              ),
-            }),
-          ]),
-        },
-      });
-    },
-  );
+  it('não cita distribuições CloudFront (a stack do frontend concede essas permissões)', () => {
+    expect(policies).not.toContain('cloudfront:');
+  });
 });

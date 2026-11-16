@@ -101,4 +101,28 @@ describe('FrontendStack', () => {
       });
     }
   });
+
+  it('concede à role de deploy só as permissões sobre as próprias distribuições', () => {
+    t.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyName: name('deploy-distributions'),
+      Roles: [name('gha-deploy')],
+      PolicyDocument: {
+        Statement: [
+          Match.objectLike({
+            Action: [
+              'cloudfront:CreateInvalidation',
+              'cloudfront:GetInvalidation',
+              'cloudfront:GetDistribution',
+              'cloudfront:AssociateAlias',
+              'cloudfront:UpdateDistribution',
+            ],
+            Resource: [
+              Match.objectLike({ 'Fn::Join': Match.anyValue() }),
+              Match.objectLike({ 'Fn::Join': Match.anyValue() }),
+            ],
+          }),
+        ],
+      },
+    });
+  });
 });

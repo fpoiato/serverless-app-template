@@ -30,10 +30,6 @@
               }
             ],
             "styles": ["src/styles.scss"],
-            "define": {
-              "APP_COLOR": "'local'",
-              "APP_VERSION": "'dev'"
-            },
             "outputPath": "dist/web"
           },
           "configurations": {

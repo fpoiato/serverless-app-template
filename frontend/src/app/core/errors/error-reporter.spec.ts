@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { APP_CONFIG, buildConfig } from '../config/app-config';
+import { APP_CONFIG, resolveConfig } from '../config/app-config';
 import { ErrorReporter, REPORTER_LIMITS } from './error-reporter';
 
 describe('ErrorReporter', () => {
@@ -12,7 +12,17 @@ describe('ErrorReporter', () => {
     fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal('fetch', fetchMock);
     TestBed.configureTestingModule({
-      providers: [{ provide: APP_CONFIG, useValue: buildConfig('green', '1.2.3', 'exemplo.com') }],
+      providers: [
+        {
+          provide: APP_CONFIG,
+          useValue: resolveConfig({
+            color: 'green',
+            version: '1.2.3',
+            apiUrl: 'https://api-green.exemplo.com',
+            wsUrl: 'wss://ws-green.exemplo.com',
+          }),
+        },
+      ],
     });
     reporter = TestBed.inject(ErrorReporter);
   });

@@ -21,7 +21,6 @@ export interface Config {
     repoId?: number;
     projectNumber?: number;
   };
-  web: { distributionIds?: { blue?: string; green?: string } };
   locale?: string;
   currency?: string;
   timeZone?: string;

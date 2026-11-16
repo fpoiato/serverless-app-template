@@ -62,16 +62,20 @@ aws apigatewayv2 create-deployment --api-id "$(stack_output WsApiId)" \
   --stage-name "$INACTIVE" --description "$VERSION" >/dev/null
 echo "  api: stages $INACTIVE implantadas"
 
-# 4. Frontend: build da cor inativa, sync no bucket e invalidação.
-(cd "$ROOT/frontend" && npx ng build \
-  --define "APP_COLOR='$INACTIVE'" --define "APP_VERSION='$VERSION'")
+# 4. Frontend: um único build (sem valores de ambiente) + /config.json da cor, gerado do SSM.
+(cd "$ROOT/frontend" && npx ng build)
 BUCKET=$(aws ssm get-parameter --name "$SSM_PREFIX/web/$INACTIVE/bucket" --query Parameter.Value --output text)
 DIST=$(aws ssm get-parameter --name "$SSM_PREFIX/web/$INACTIVE/distribution-id" --query Parameter.Value --output text)
 DIST_DIR="$ROOT/frontend/dist/web/browser"
 [[ -d "$DIST_DIR" ]] || { echo "build não encontrado em $DIST_DIR" >&2; exit 1; }
-# Assets com hash: cache longo. index.html: sem cache.
-aws s3 sync "$DIST_DIR" "s3://$BUCKET" --delete --exclude index.html \
+aws ssm get-parameters-by-path --path "$SSM_PREFIX/public" --recursive --output json \
+  | node "$ROOT/infra/scripts/web-config.mjs" "$INACTIVE" "$VERSION" > "$DIST_DIR/config.json"
+echo "  config.json: $(tr -d '\n ' < "$DIST_DIR/config.json")"
+# Assets com hash: cache longo. index.html e config.json: sem cache.
+aws s3 sync "$DIST_DIR" "s3://$BUCKET" --delete --exclude index.html --exclude config.json \
   --cache-control "public,max-age=31536000,immutable"
+aws s3 cp "$DIST_DIR/config.json" "s3://$BUCKET/config.json" \
+  --cache-control "no-cache" --content-type "application/json"
 aws s3 cp "$DIST_DIR/index.html" "s3://$BUCKET/index.html" \
   --cache-control "no-cache" --content-type "text/html; charset=utf-8"
 aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/*' >/dev/null

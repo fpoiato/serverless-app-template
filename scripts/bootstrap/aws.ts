@@ -178,31 +178,13 @@ const cdkDeploy = (c: Config, color: string, stacks: string[]) =>
     { cwd: 'infra' },
   );
 
-/** Stacks de infraestrutura. Depois do frontend, grava os IDs das distribuições e reaplica a role de deploy. */
+/** Stacks de infraestrutura. Saídas (IDs, ARNs) ficam no SSM, publicadas pelas próprias stacks. */
 export function deployInfra(c: Config, activeColor: string): void {
   log.step('AWS: stacks (pode levar 10–20 min na primeira vez)');
   run('npm', ['run', 'build', '-w', '@app/shared']);
   writeConfig(c); // a infra lê o project.config.json
   cdkDeploy(c, activeColor, ['github-oidc', 'dns-certs', 'frontend', 'backend']);
-  const outputs =
-    awsJson<{ Stacks: { Outputs?: { OutputKey: string; OutputValue: string }[] }[] }>(
-      'cloudformation',
-      'describe-stacks',
-      '--stack-name',
-      `${c.slug}-frontend`,
-      '--region',
-      c.aws.region,
-    ).Stacks[0]!.Outputs ?? [];
-  const id = (color: string) =>
-    outputs.find((o) => o.OutputKey === `DistributionId${color}`)?.OutputValue;
-  const ids = { blue: id('blue'), green: id('green') };
-  if (ids.blue !== c.web.distributionIds?.blue || ids.green !== c.web.distributionIds?.green) {
-    c.web.distributionIds = ids;
-    writeConfig(c);
-    log.ok(`distribuições: blue ${ids.blue}, green ${ids.green}`);
-    cdkDeploy(c, activeColor, ['github-oidc']);
-    log.ok('role de deploy com permissão de swap nas distribuições do projeto');
-  }
+  log.ok('stacks implantadas');
 }
 
 const bucketHasApp = (c: Config, color: string) =>

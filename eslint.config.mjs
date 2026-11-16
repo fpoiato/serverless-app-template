@@ -24,6 +24,11 @@ export default tseslint.config(
     },
   },
   {
+    // Scripts Node em JavaScript puro (ESM).
+    files: ['**/*.mjs'],
+    languageOptions: { globals: { process: 'readonly', console: 'readonly', URL: 'readonly' } },
+  },
+  {
     files: ['infra/bin/**'],
     rules: { 'no-new': 'off' },
   },
