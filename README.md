@@ -41,6 +41,10 @@ O bootstrap é **idempotente**: se parar no meio, corrija e rode de novo. Ele fa
 4. **Primeiro deploy** nas duas cores, com o site no ar
 5. Commit inicial e `DEPLOY_ENABLED=true`, a partir de quando todo merge faz deploy
 
+Para rodar uma fase só, use `--only github` (repo, labels, board), `--only aws` (infra e primeiro deploy;
+não precisa do `gh`) ou `--only finalize` (commit inicial, proteção da `main`, `DEPLOY_ENABLED`). Útil quando o
+login do GitHub e as credenciais da AWS estão em máquinas diferentes, ou para repetir só a parte que falhou.
+
 ### O que só você pode fazer
 
 O bootstrap confere e lista o que faltar:
